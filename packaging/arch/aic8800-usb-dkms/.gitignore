@@ -1,0 +1,8 @@
+# makepkg working directories and local VCS checkout
+/aic8800/
+/src/
+/pkg/
+
+# makepkg packages and logs
+/*.pkg.tar.*
+/*.log

@@ -1,0 +1,16 @@
+# kernel/module build artifacts
+*.o
+*.ko
+*.cmd
+*.mod
+*.mod.c
+*.mod.o
+Module.symvers
+modules.order
+.*.cmd
+*.rej
+*.orig
+*.bak*
+
+# generated debug bundles
+logs/

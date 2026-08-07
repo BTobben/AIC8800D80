@@ -1,0 +1,23 @@
+name: "Public release audit"
+"on":
+  merge_group: {}
+  pull_request: {}
+  push: {}
+  workflow_dispatch: {}
+
+permissions:
+  contents: "read"
+
+jobs:
+  audit:
+    runs-on: "ubuntu-latest"
+    steps:
+    - name: "Checkout complete history"
+      uses: "actions/checkout@v6"
+      with:
+        fetch-depth: 0
+    - name: "Audit publication tree"
+      run: tools/check_public_release.sh --tree
+    - if: "${{ github.event.repository.private == false }}"
+      name: "Audit public history"
+      run: tools/check_public_release.sh --history

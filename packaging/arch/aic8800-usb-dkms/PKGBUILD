@@ -1,0 +1,64 @@
+pkgname=aic8800-usb-dkms
+pkgver=r0.g0000000
+pkgrel=1
+pkgdesc='Firmware-free DKMS package for AIC8800 USB Bluetooth, D80 loader, and ACL ZLP quirk modules'
+arch=('x86_64' 'aarch64')
+url='https://github.com/BTobben/AIC8800D80'
+license=('GPL2')
+depends=('dkms')
+makedepends=('git')
+optdepends=(
+  'aic8800d80-dkms: aic8800_fdrv runtime Wi-Fi driver for the three-interface D80 profile'
+  'aic8800-mcu1-firmware: locally supplied firmware for chip_id=7, chip_mcu_id=1 devices'
+)
+
+# Public builds use the repository's default branch. Development and PR builds
+# can select an explicit repository URL and ref without embedding a workstation
+# path in this tracked PKGBUILD, for example:
+#
+#   AIC8800_REPO_URL="file:///path/to/aic8800" \
+#   AIC8800_REPO_REF="my-branch" makepkg -C
+_repo_url="${AIC8800_REPO_URL:-https://github.com/BTobben/AIC8800D80.git}"
+_repo_ref="${AIC8800_REPO_REF:-main}"
+source=(
+  "aic8800::git+${_repo_url}#branch=${_repo_ref}"
+  'dkms.conf'
+)
+sha256sums=('SKIP' 'SKIP')
+
+pkgver() {
+  cd "${srcdir}/aic8800"
+  git describe --tags --always | sed 's/^v//;s/-/+/g'
+}
+
+package() {
+  local _src="${srcdir}/aic8800"
+  local _dkms_src="${pkgdir}/usr/src/aic8800-usb-${pkgver}"
+  local _btusb_dkms_flags=""
+
+  if [[ "${AIC8800_BLUEDROID_DIAG:-0}" == "1" ]]; then
+    _btusb_dkms_flags="CONFIG_AIC8800_BLUEDROID_DIAG=y"
+    msg "Building diagnostic Bluedroid aic_btusb DKMS variant (/dev/aicbt_dev enabled)"
+  fi
+
+  install -d "${_dkms_src}"
+
+  install -d "${_dkms_src}/src/USB/driver_fw/drivers/aic8800"
+  cp -a --no-preserve=ownership \
+    "${_src}/src/USB/driver_fw/drivers/aic_btusb" \
+    "${_src}/src/USB/driver_fw/drivers/aic_zlp_quirk" \
+    "${_dkms_src}/src/USB/driver_fw/drivers/"
+  cp -a --no-preserve=ownership \
+    "${_src}/src/USB/driver_fw/drivers/aic8800/aic_load_fw" \
+    "${_dkms_src}/src/USB/driver_fw/drivers/aic8800/"
+
+  # Vendor firmware is intentionally not redistributed by this package.
+  # MCU1 hardware fails closed until the separately prepared local firmware
+  # package provides the five revision-specific files.
+
+  install -m644 "${srcdir}/dkms.conf" "${_dkms_src}/dkms.conf"
+  sed -i \
+    -e "s/@PKGVER@/${pkgver}/g" \
+    -e "s/@AIC8800_BTUSB_DKMS_FLAGS@/${_btusb_dkms_flags}/g" \
+    "${_dkms_src}/dkms.conf"
+}
