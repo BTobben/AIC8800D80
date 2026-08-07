@@ -50,7 +50,7 @@ jobs:
       shell: "bash"
     - name: "Setup Pages"
       if: "${{ hashFiles('book.toml') != '' && hashFiles('src/SUMMARY.md') != '' }}"
-      uses: "actions/configure-pages@v5"
+      uses: "actions/configure-pages@v6"
     - name: "Upload artifact"
       if: "${{ hashFiles('book.toml') != '' && hashFiles('src/SUMMARY.md') != '' }}"
       uses: "actions/upload-pages-artifact@v4"
