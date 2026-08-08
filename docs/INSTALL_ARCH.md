@@ -67,8 +67,11 @@ The package in this repository provides:
 - `aic_zlp_quirk`, scoped to the supported Bluetooth bulk endpoint behavior.
 
 The vendor runtime interface used for Wi-Fi is owned by `aic8800_fdrv`. That
-module currently comes from the separately maintained `aic8800d80-dkms`
-package used during hardware acceptance.
+module currently comes from an `aic8800d80-dkms` package derived from the
+separately maintained
+[`shenmintao/aic8800d80`](https://github.com/shenmintao/aic8800d80) project and
+used during hardware acceptance. See
+[the component and contribution boundaries](UPSTREAM_RELATIONSHIP.md).
 
 The setup helper behaves conservatively:
 

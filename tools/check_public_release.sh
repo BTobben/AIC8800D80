@@ -225,6 +225,16 @@ if (( check_tree )); then
         exit 17
     fi
 
+    release_workflow="$tree_root/.github/workflows/release.yaml"
+    if [[ ! -f "$release_workflow" ]] || \
+            ! grep -Fq 'publish_prerelease:' "$release_workflow" || \
+            ! grep -Fq 'prerelease: true' "$release_workflow" || \
+            grep -Eq 'prerelease:[[:space:]]*false|[.]artifacts/.*[.]deb' \
+                "$release_workflow"; then
+        echo "ERROR: release workflow must remain opt-in, source-only, and prerelease-only" >&2
+        exit 18
+    fi
+
     echo "public_tree_audit=passed"
 fi
 

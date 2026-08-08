@@ -27,6 +27,36 @@ mirror or graft history from a private development repository.
 
 The complete privacy boundary is documented in [PRIVACY.md](PRIVACY.md).
 
+## Release maturity and naming
+
+The public `main` branch is currently a test-publication surface, not a stable
+1.0 product declaration. The first tagged release should be
+`v0.1.0-rc1`, clearly marked as a GitHub prerelease. Do not publish a stable
+`v1.0.0` or describe the project as the canonical general AIC8800 driver.
+
+The manual release workflow defaults to build-only. Its explicit publication
+mode accepts only `v0.x.y-rcN` tags and creates a source-only GitHub prerelease.
+It must not attach the CI-built Debian packages: the inherited Debian build
+still produces a separate firmware package and is retained for compilation
+coverage, not as the supported MCU1 distribution route.
+
+Before the first release candidate:
+
+- confirm the upstream relationship remains prominent in `README.md`;
+- rerun the complete publication and package-build CI;
+- publish no MCU1 firmware, locally generated firmware package, or diagnostic
+  bundle;
+- describe Arch Linux and `chip_id=7` / `chip_mcu_id=1` as the accepted scope;
+- retain HFP/SCO and other distributions as explicit limitations.
+
+Before a stable release, repeat cold-boot AAC testing for at least one hour and
+exercise normal Wi-Fi traffic concurrently on the supported runtime identity.
+Record only redacted results. Generic loader hardening and any broader
+VID:PID support should be offered to upstream after that evidence is available.
+
+See [UPSTREAM_RELATIONSHIP.md](UPSTREAM_RELATIONSHIP.md) for ownership and
+contribution routing.
+
 ## Firmware boundary
 
 The five MCU1 files listed in `firmware/aic8800d80-mcu1.manifest` are not

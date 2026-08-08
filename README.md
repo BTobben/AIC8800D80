@@ -1,12 +1,36 @@
-# AIC8800D80 Linux Wi-Fi and Bluetooth driver
+# AIC8800D80 MCU1 Linux integration
 
-Linux support for USB adapters based on the AICSemi AIC8800D80 MCU1 chipset.
-These adapters are often sold as generic **AX900**, **Wi-Fi 6 + Bluetooth 5.4**,
-or under short-lived retail brand names.
+An Arch-focused integration and hardening project for USB adapters based on the
+AICSemi AIC8800D80 MCU1 chipset. These adapters are often sold as generic
+**AX900**, **Wi-Fi 6 + Bluetooth 5.4**, or under short-lived retail brand names.
 
 This project is intended for Linux users who can identify their adapter as
 AIC8800D80-based but cannot use it with the drivers included in a normal Linux
 distribution.
+
+## Relationship to upstream
+
+This is not the original AIC8800 driver project and is not intended to replace
+the broader [`shenmintao/aic8800d80`](https://github.com/shenmintao/aic8800d80)
+community driver. It complements that project with a firmware-free,
+hardware-revision-gated Arch integration for the exact MCU1 profile tested
+here.
+
+The production stack deliberately combines components from several owners:
+
+| Component | Production responsibility |
+| --- | --- |
+| Wi-Fi runtime | `aic8800_fdrv` from a separately reviewed upstream-derived `aic8800d80-dkms` package |
+| Firmware loader | This project's hardened, MCU1-gated `aic_load_fw` build |
+| Bluetooth HCI | The distribution kernel's standard `btusb` module |
+| Bluetooth ACL ZLP compatibility | This project's device-scoped `aic_zlp_quirk` build |
+| MCU1 firmware | User-fetched from a pinned upstream commit and verified locally; never redistributed here |
+
+Use the upstream project first for general AIC8800 support, other chip or MCU
+revisions, and cross-distribution driver development. Use this project for its
+documented Arch/MCU1 installation, firmware boundary, hardening, diagnostics,
+and exact hardware-validation scope. See
+[upstream relationship and contribution boundaries](docs/UPSTREAM_RELATIONSHIP.md).
 
 > [!IMPORTANT]
 > `AX900` is a marketing label, not a chipset identifier. Do not install this
@@ -94,11 +118,13 @@ never fetched by CI, committed to this repository, or attached to releases.
 Use `--firmware-source /path/to/aic8800D80` instead when you already have a
 vendor-supplied firmware directory.
 
-Wi-Fi additionally needs the `aic8800_fdrv` runtime module. The helper accepts
-an already installed `aic8800d80-dkms` package or an explicitly supplied local
-package through `--wifi-package`. It does not silently execute a moving AUR
-PKGBUILD. Bluetooth and loader packaging can still be built without that
-optional Wi-Fi dependency, but Wi-Fi will remain unavailable.
+Wi-Fi additionally needs the `aic8800_fdrv` runtime module from the separately
+maintained [`shenmintao/aic8800d80`](https://github.com/shenmintao/aic8800d80)
+driver family. The helper accepts an already installed `aic8800d80-dkms`
+package or an explicitly supplied local package through `--wifi-package`. It
+does not silently execute a moving AUR PKGBUILD. Bluetooth and loader packaging
+can still be built without that optional Wi-Fi dependency, but Wi-Fi will
+remain unavailable.
 
 Read the [Arch installation guide](docs/INSTALL_ARCH.md) before using custom
 kernel packages, Secure Boot, or a separately built Wi-Fi runtime package.
@@ -165,15 +191,18 @@ See [firmware/README.md](firmware/README.md) for offline and manual procedures.
 - [MCU1 firmware profile](docs/AIC8800D80_MCU1_PROFILE.md)
 - [Bluetooth audio ZLP fix](docs/AIC8800D80_BLUETOOTH_AUDIO_ZLP.md)
 - [Hardware validation record](docs/HARDWARE_VALIDATION.md)
+- [Upstream relationship and contribution boundaries](docs/UPSTREAM_RELATIONSHIP.md)
 - [Publication privacy boundary](docs/PRIVACY.md)
 - [Maintainer and release constraints](docs/MAINTAINER_NOTES.md)
 
 ## Project scope
 
 The production path deliberately uses the standard Linux `btusb` driver for
-the Bluetooth-class interfaces. The project supplies the D80 loader integration,
-revision-gated MCU1 firmware selection, DKMS packaging, diagnostics, and the
-device-scoped Bluetooth bulk-transfer compatibility module.
+the Bluetooth-class interfaces. This project supplies the D80 loader
+integration, revision-gated MCU1 firmware selection, Arch/DKMS packaging,
+diagnostics, security hardening, and the device-scoped Bluetooth bulk-transfer
+compatibility module. It does not claim independent authorship of the vendor
+driver family or general support for every AIC8800 revision.
 
 The code is derived from the public Radxa/AICSemi driver family. Licensing and
 attribution for inherited source are documented in `LICENSE`, `src/LICENSE`,

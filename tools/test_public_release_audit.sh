@@ -56,5 +56,9 @@ expect_rejection enabled-network-snoop 'experimental Android network btsnoop is 
 sed -i '/EXPERIMENTAL_DIAGNOSTIC_ONLY/d' "$worktree/$btsnoop_source"
 expect_rejection unmarked-network-snoop 'unmarked experimental network btsnoop source'
 
+sed -i 's/prerelease: true/prerelease: false/' \
+    "$worktree/.github/workflows/release.yaml"
+expect_rejection stable-binary-release 'release workflow must remain opt-in, source-only, and prerelease-only'
+
 $audit --tree "$worktree"
 echo 'public_audit_regressions=passed'
