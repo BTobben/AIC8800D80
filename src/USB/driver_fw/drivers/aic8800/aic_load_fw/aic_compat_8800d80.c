@@ -399,9 +399,12 @@ static int aicbt_ext_patch_data_load(struct aic_usb_dev *usb_dev,
             id = *(patch_info->ext_patch_param + (index * 2));
             addr = *(patch_info->ext_patch_param + (index * 2) + 1);
             memset(ext_patch_file_name, 0, sizeof(ext_patch_file_name));
-            sprintf(ext_patch_file_name,"%s%d.bin",
-                filename,
-                id);
+            if (snprintf(ext_patch_file_name, sizeof(ext_patch_file_name),
+                    "%s%d.bin", filename, id) >=
+                    sizeof(ext_patch_file_name)) {
+                printk("%s ext patch filename too long\r\n", __func__);
+                return -ENAMETOOLONG;
+            }
             AICWFDBG(LOGDEBUG, "%s ext_patch_file_name:%s ext_patch_id:%x ext_patch_addr:%x \r\n",
                 __func__,ext_patch_file_name, id, addr);
 
@@ -478,9 +481,10 @@ int aicfw_download_fw_8800d80(struct aic_usb_dev *usb_dev)
         patch_info.addr_adid = FW_RAM_ADID_BASE_ADDR_8800D80_U02;
         patch_info.addr_patch = FW_RAM_PATCH_BASE_ADDR_8800D80_U02;
     }
-    aicbt_patch_info_unpack(&patch_info, head);
-    if(patch_info.info_len == 0) {
+    if (aicbt_patch_info_unpack(&patch_info, head) ||
+            patch_info.info_len == 0) {
         printk("%s, aicbt_patch_info_unpack fail\n", __func__);
+        aicbt_patch_table_free(head);
         return -1;
     }
 

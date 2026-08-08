@@ -162,13 +162,11 @@ void aicwf_tx_deinit(struct aicwf_tx_priv* tx_priv)
 
 static bool aicwf_another_ptk(struct sk_buff *skb)
 {
-    u8 *data;
     u16 aggr_len = 0;
 
-    if(skb->data == NULL || skb->len == 0) {
+    if (!skb || !skb->data || skb->len < 4) {
         return false;
     }
-    data = skb->data;
     aggr_len = (*skb->data | (*(skb->data + 1) << 8));
     if(aggr_len == 0) {
         return false;
@@ -184,7 +182,8 @@ int aicwf_process_rxframes(struct aicwf_rx_priv *rx_priv)
     struct sk_buff *skb = NULL;
     u16 pkt_len = 0;
     struct sk_buff *skb_inblock = NULL;
-    u16 aggr_len = 0, adjust_len = 0;
+    unsigned int aggr_len = 0, adjust_len = 0;
+    unsigned int frame_len = 0;
     u8 *data = NULL;
 
     while (1) {
@@ -211,6 +210,10 @@ int aicwf_process_rxframes(struct aicwf_rx_priv *rx_priv)
                 else
                     adjust_len = aggr_len;
 
+                frame_len = aggr_len;
+                if (frame_len > skb->len || adjust_len > skb->len)
+                    goto malformed_frame;
+
                 skb_inblock = __dev_alloc_skb(aggr_len + CCMP_OR_WEP_INFO, GFP_KERNEL);//8 is for ccmp mic or wep icv
                 if(skb_inblock == NULL){
                     txrx_err("no more space!\n");
@@ -230,6 +233,11 @@ int aicwf_process_rxframes(struct aicwf_rx_priv *rx_priv)
                 else
                     adjust_len = aggr_len;
 
+               frame_len = aggr_len + 4;
+               adjust_len += 4;
+               if (frame_len > skb->len || adjust_len > skb->len)
+                   goto malformed_frame;
+
                skb_inblock = __dev_alloc_skb(aggr_len+4, GFP_KERNEL);
                if(skb_inblock == NULL){
                    txrx_err("no more space!\n");
@@ -240,9 +248,23 @@ int aicwf_process_rxframes(struct aicwf_rx_priv *rx_priv)
                 skb_put(skb_inblock, aggr_len+4);
                 memcpy(skb_inblock->data, data, aggr_len+4);
                 if((*(skb_inblock->data + 2) & 0x7f) == USB_TYPE_CFG_CMD_RSP)
-                    rwnx_rx_handle_msg(rx_priv->usbdev, (struct ipc_e2a_msg *)(skb_inblock->data + 4));
-                skb_pull(skb, adjust_len+4);
+                    rwnx_rx_handle_msg(rx_priv->usbdev,
+                        (struct ipc_e2a_msg *)(skb_inblock->data + 4),
+                        aggr_len);
+                skb_pull(skb, adjust_len);
             }
+
+			dev_kfree_skb(skb_inblock);
+			skb_inblock = NULL;
+			continue;
+
+malformed_frame:
+			txrx_err("malformed aggregate frame: pkt_len=%u available=%u\n",
+				 pkt_len, skb->len);
+			ret = -EPROTO;
+			dev_kfree_skb(skb_inblock);
+			skb_inblock = NULL;
+			break;
         }
 
 		dev_kfree_skb(skb_inblock);
@@ -483,5 +505,3 @@ bool aicwf_frame_enq(struct device *dev, struct frame_queue *q, struct sk_buff *
 
     return p != NULL;
 }
-
-

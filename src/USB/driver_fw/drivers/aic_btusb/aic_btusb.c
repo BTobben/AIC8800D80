@@ -999,7 +999,7 @@ static int hci_register_dev(struct hci_dev *hdev)
 
     write_lock(&hci_dev_lock);
 
-    sprintf(hdev->name, "hci%d", id);
+    snprintf(hdev->name, sizeof(hdev->name), "hci%d", id);
     hdev->id = id;
     hdev->flags = 0;
     hdev->dev_flags = 0;
@@ -1520,7 +1520,7 @@ static ssize_t btchr_write(struct file *file_p,
         return count;
     }
 
-    if (count > HCI_MAX_FRAME_SIZE)
+    if (count < 1 || count > HCI_MAX_FRAME_SIZE)
         return -EINVAL;
 
     skb = bt_skb_alloc(count, GFP_ATOMIC);
@@ -1651,8 +1651,11 @@ static long btchr_ioctl(struct file *file_p,unsigned int cmd, unsigned long arg)
 #if 1
 	case SET_ISO_CFG:
             AICBT_INFO("btchr_ioctl SET_ISO_CFG");
-		if(copy_from_user(&(hdev->voice_setting), (__u16*)arg, sizeof(__u16))){
+		if (copy_from_user(&(hdev->voice_setting), (__u16 *)arg,
+				   sizeof(__u16))) {
 			AICBT_INFO(" voice settings err");
+			ret = -EFAULT;
+			goto failed;
 		}
 		//hdev->voice_setting = *(uint16_t*)arg;
 		AICBT_INFO(" voice settings = %d", hdev->voice_setting);
@@ -2684,6 +2687,10 @@ int patch_table_load(firmware_info *fw_info, struct aicbt_patch_table *_head)
     for (p = head; p != NULL; p = p->next) {
         data = p->data;
         if(AICBT_PT_BTMODE == p->type){
+            if (!data || p->len < 9) {
+                AICBT_ERR("%s: malformed BTMODE record", __func__);
+                return -EINVAL;
+            }
             *(data + 1)  = aicbsp_info.hwinfo < 0;
             *(data + 3) = aicbsp_info.hwinfo;
             *(data + 5)  = aicbsp_info.cpmode;
@@ -2707,6 +2714,8 @@ int patch_table_load(firmware_info *fw_info, struct aicbt_patch_table *_head)
             continue;
         }
         if (p->type == AICBT_PT_VER) {
+            if (!data)
+                return -EINVAL;
             char *data_s = (char *)p->data;
             printk("patch version %s\n", data_s);
             continue;
@@ -2913,13 +2922,13 @@ int aic_load_firmware(u8 ** fw_buf, const char *name, struct device *device)
 
 int aicbt_patch_table_free(struct aicbt_patch_table **head)
 {
-    struct aicbt_patch_table *p = *head, *n = NULL;
-    while (p) {
-        n = p->next;
-        kfree(p->name);
-        kfree(p->data);
-        kfree(p);
-        p = n;
+	struct aicbt_patch_table *p = *head, *n = NULL;
+	while (p) {
+		n = p->next;
+		kvfree(p->name);
+		kvfree(p->data);
+		kvfree(p);
+		p = n;
     }
     *head = NULL;
     return 0;
@@ -2930,10 +2939,12 @@ struct aicbt_patch_table *aicbt_patch_table_alloc(const char *filename)
 	uint8_t *rawdata = NULL, *p;
 	int size;
 	struct aicbt_patch_table *head = NULL, *new = NULL, *cur = NULL;
+	size_t remaining;
+	size_t data_size;
 
 	/* load aic firmware */
 	size = aic_load_firmware((u8 **)&rawdata, filename, NULL);
-	if (size <= 0) {
+	if (size < 16) {
 		printk("wrong size of firmware file\n");
 		goto err;
 	}
@@ -2947,8 +2958,15 @@ struct aicbt_patch_table *aicbt_patch_table_alloc(const char *filename)
 
 	while (p - rawdata < size) {
 		printk("size = %d  p - rawdata = 0x%0lx \r\n", size, p - rawdata);
-		new = (struct aicbt_patch_table *)vmalloc(sizeof(struct aicbt_patch_table));
-		memset(new, 0, sizeof(struct aicbt_patch_table));
+		remaining = size - (p - rawdata);
+		if (remaining < 24) {
+			printk("truncated patch table entry header\n");
+			goto err;
+		}
+
+		new = kzalloc(sizeof(*new), GFP_KERNEL);
+		if (!new)
+			goto err;
 		if (head == NULL) {
 			head = new;
 			cur  = new;
@@ -2957,15 +2975,16 @@ struct aicbt_patch_table *aicbt_patch_table_alloc(const char *filename)
 			cur = cur->next;
 		}
 
-		cur->name = (char *)vmalloc(sizeof(char) * 16);
-		memset(cur->name, 0, sizeof(char) * 16);
+		cur->name = kzalloc(17, GFP_KERNEL);
+		if (!cur->name)
+			goto err;
 		memcpy(cur->name, p, 16);
 		p += 16;
 
-		cur->type = *(uint32_t *)p;
+		memcpy(&cur->type, p, sizeof(cur->type));
 		p += 4;
 
-		cur->len = *(uint32_t *)p;
+		memcpy(&cur->len, p, sizeof(cur->len));
 		p += 4;
 		
 		printk("cur->type %x, len %d\n", cur->type, cur->len);
@@ -2974,10 +2993,18 @@ struct aicbt_patch_table *aicbt_patch_table_alloc(const char *filename)
 			cur->len = 0;
 		}else{
 			if(cur->len > 0){
-				cur->data = (uint32_t *)vmalloc(sizeof(uint8_t) * cur->len * 8);
-				memset(cur->data, 0, sizeof(uint8_t) * cur->len * 8);
-				memcpy(cur->data, p, cur->len * 8);
-				p += cur->len * 8;
+				remaining = size - (p - rawdata);
+				if (cur->len > remaining / 8) {
+					printk("patch table entry exceeds firmware size\n");
+					goto err;
+				}
+				data_size = (size_t)cur->len * 8;
+				/* Extra NUL keeps version records safe when logged as strings. */
+				cur->data = kvzalloc(data_size + 1, GFP_KERNEL);
+				if (!cur->data)
+					goto err;
+				memcpy(cur->data, p, data_size);
+				p += data_size;
 			}
 		}
 	}
@@ -3000,6 +3027,9 @@ int aicbt_patch_info_unpack(struct aicbt_patch_info_t *patch_info, struct aicbt_
     uint8_t *patch_info_array = (uint8_t*)patch_info;
     int base_len = 0;
     int memcpy_len = 0;
+
+    if (!patch_info || !head_t || !head_t->data)
+        return -EINVAL;
     
     if (AICBT_PT_INF == head_t->type) {
         base_len = ((offsetof(struct aicbt_patch_info_t,  ext_patch_nb_addr) - offsetof(struct aicbt_patch_info_t,  adid_addrinf) )/sizeof(uint32_t))/2;
@@ -3016,6 +3046,9 @@ int aicbt_patch_info_unpack(struct aicbt_patch_info_t *patch_info, struct aicbt_
 
         if (patch_info->info_len == 0)
             return 0;
+
+        if (memcpy_len < 0 || memcpy_len > head_t->len)
+            return -EINVAL;
        
         memcpy(((patch_info_array) + sizeof(patch_info->info_len)), 
             head_t->data, 
@@ -3026,6 +3059,15 @@ int aicbt_patch_info_unpack(struct aicbt_patch_info_t *patch_info, struct aicbt_
 
         if (patch_info->ext_patch_nb > 0){
             int index = 0;
+
+            if (patch_info->ext_patch_nb > head_t->len - memcpy_len) {
+                printk("%s ext patch count %u exceeds remaining records %u\r\n",
+                    __func__, patch_info->ext_patch_nb,
+                    head_t->len - memcpy_len);
+                patch_info->ext_patch_nb = 0;
+                patch_info->ext_patch_param = NULL;
+                return -EINVAL;
+            }
             patch_info->ext_patch_param = (uint32_t *)(head_t->data + ((memcpy_len) * 2));
             
             for(index = 0; index < patch_info->ext_patch_nb; index++){
@@ -3108,9 +3150,12 @@ int aicbt_ext_patch_data_load(firmware_info *fw_info, struct aicbt_patch_info_t 
             id = *(patch_info->ext_patch_param + (index * 2));
             addr = *(patch_info->ext_patch_param + (index * 2) + 1); 
             memset(ext_patch_file_name, 0, sizeof(ext_patch_file_name));
-            sprintf(ext_patch_file_name,"%s%d.bin",
-                aicbt_fw->bt_ext_patch,
-                id);
+            if (snprintf(ext_patch_file_name, sizeof(ext_patch_file_name),
+                    "%s%d.bin", aicbt_fw->bt_ext_patch, id) >=
+                    sizeof(ext_patch_file_name)) {
+                printk("%s ext patch filename too long\r\n", __func__);
+                return -ENAMETOOLONG;
+            }
             printk("%s ext_patch_file_name:%s ext_patch_id:%x ext_patch_addr:%x \r\n",
                 __func__,ext_patch_file_name, id, addr);
             
@@ -3148,16 +3193,21 @@ int aicbt_patch_trap_data_load(firmware_info *fw_info, struct aicbt_patch_table 
     }
 
     patch_info.addr_patch = FW_RAM_PATCH_BASE_ADDR;//set default patch base addr
-    aicbt_patch_info_unpack(&patch_info, head);
+    if (aicbt_patch_info_unpack(&patch_info, head)) {
+        printk("aic patch info is malformed\n");
+        return -EINVAL;
+    }
 
-    if(download_data(fw_info, patch_info.addr_patch, aicbt_fw->bt_patch)){
+    ret_val = download_data(fw_info, patch_info.addr_patch, aicbt_fw->bt_patch);
+    if (ret_val) {
         printk("aic load patch fail %d\n", ret_val);
-        return -1;
+        return ret_val;
     }
     
-	if (aicbt_ext_patch_data_load(fw_info, &patch_info)){
+	ret_val = aicbt_ext_patch_data_load(fw_info, &patch_info);
+	if (ret_val) {
         printk("aic load ext patch fail %d\n", ret_val);
-		return -1;
+			return ret_val;
     }
 
 	return 0;
@@ -3166,7 +3216,7 @@ int aicbt_patch_trap_data_load(firmware_info *fw_info, struct aicbt_patch_table 
 int download_patch(firmware_info *fw_info, int cached)
 {
     int ret_val = 0;
-    struct aicbt_patch_table *head;
+    struct aicbt_patch_table *head = NULL;
 
     printk("%s: Download fw patch start, cached %d", __func__, cached);
     AICBT_INFO("diag: download_patch stage=start cached=%d", cached);
@@ -3245,6 +3295,7 @@ int download_patch(firmware_info *fw_info, int cached)
     }
 
 free:
+    aicbt_patch_table_free(&head);
     /* Free fw data after download finished */
     kfree(fw_info->fw_data);
     fw_info->fw_data = NULL;
@@ -5471,9 +5522,10 @@ static AIC_sco_card_t* btusb_snd_init(struct usb_interface *intf, const struct u
     pSCOSnd->dev = interface_to_usbdev(intf);
     pSCOSnd->usb_data = data;
 
-    strcpy(card->driver, AIC_SCO_ID);
-    strcpy(card->shortname, "Aicsemi sco snd");
-    sprintf(card->longname, "Aicsemi sco over hci: VID:0x%04x, PID:0x%04x",
+    strscpy(card->driver, AIC_SCO_ID, sizeof(card->driver));
+    strscpy(card->shortname, "Aicsemi sco snd", sizeof(card->shortname));
+    snprintf(card->longname, sizeof(card->longname),
+        "Aicsemi sco over hci: VID:0x%04x, PID:0x%04x",
         id->idVendor, pSCOSnd->dev->descriptor.idProduct);
 
     err = snd_pcm_new(card, AIC_SCO_ID, 0, 1, 1, &pSCOSnd->pcm);
@@ -5482,7 +5534,8 @@ static AIC_sco_card_t* btusb_snd_init(struct usb_interface *intf, const struct u
         return NULL;
     }
     pSCOSnd->pcm->private_data = pSCOSnd;
-    sprintf(pSCOSnd->pcm->name, "sco_pcm:VID:0x%04x, PID:0x%04x",
+    snprintf(pSCOSnd->pcm->name, sizeof(pSCOSnd->pcm->name),
+      "sco_pcm:VID:0x%04x, PID:0x%04x",
       id->idVendor, pSCOSnd->dev->descriptor.idProduct);
 
     snd_pcm_set_ops(pSCOSnd->pcm, SNDRV_PCM_STREAM_PLAYBACK, &snd_sco_playback_pcm_ops);

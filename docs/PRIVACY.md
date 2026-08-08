@@ -35,6 +35,13 @@ Do not mechanically remove inherited attribution without a separate licensing
 review. The publication audit instead distinguishes upstream source provenance
 from project-owned documentation, packaging, workflows, and tools.
 
+The complete source tree is nevertheless checked for high-confidence secrets,
+shared Android Bluetooth addresses, enabled experimental network snooping, and
+new workstation or personal-mail identities. Three exact legacy vendor
+identity exceptions are kept in the audit itself for inherited source
+attribution and build examples. Adding another identity causes the audit to
+fail.
+
 ## Before every public push
 
 Run:

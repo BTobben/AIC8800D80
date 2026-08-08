@@ -15,6 +15,15 @@
  *  limitations under the License.
  *
  ******************************************************************************/
+/*
+ * EXPERIMENTAL_DIAGNOSTIC_ONLY:
+ *
+ * This is an inherited Android userspace network-btsnoop prototype. It is not
+ * part of the supported Linux USB DKMS build, is disabled by default in the
+ * supplied configuration, and retains historical fixed RFC1918 lab endpoints.
+ * Do not enable it in production. A future implementation must make endpoints
+ * explicit configuration and validate every packet length before copying.
+ */
 #define LOG_TAG "aic_btsnoop_net"
 #include "aic_btsnoop_net.h"
 #include <unistd.h>
