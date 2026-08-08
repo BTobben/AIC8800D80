@@ -53,7 +53,7 @@ jobs:
       uses: "actions/configure-pages@v5"
     - name: "Upload artifact"
       if: "${{ hashFiles('book.toml') != '' && hashFiles('src/SUMMARY.md') != '' }}"
-      uses: "actions/upload-pages-artifact@v4"
+      uses: "actions/upload-pages-artifact@v5"
       with:
         path: "./book/html"
     - if: "${{ github.event_name != 'pull_request' && hashFiles('book.toml') != '' && hashFiles('src/SUMMARY.md') != '' }}"
