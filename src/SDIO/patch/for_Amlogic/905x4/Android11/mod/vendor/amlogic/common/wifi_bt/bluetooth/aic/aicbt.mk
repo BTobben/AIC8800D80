@@ -8,5 +8,6 @@ BOARD_HAVE_BLUETOOTH := true
 PRODUCT_PACKAGES += \
 	libbt-vendor-aic
 
-PRODUCT_PROPERTY_OVERRIDES += \
-	persist.service.bdroid.bdaddr=22:23:67:c6:69:73
+# Do not set persist.service.bdroid.bdaddr to a shared constant here. Products
+# using this reference integration must obtain a unique Bluetooth address from
+# controller OTP/eFuse or provision a unique per-device address downstream.

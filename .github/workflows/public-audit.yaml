@@ -18,6 +18,10 @@ jobs:
         fetch-depth: 0
     - name: "Audit publication tree"
       run: tools/check_public_release.sh --tree
+    - name: "Test audit rejection rules"
+      run: tools/test_public_release_audit.sh
+    - name: "Check supported USB memory-safety policy"
+      run: tools/check_usb_memory_safety.sh
     - if: "${{ github.event.repository.private == false }}"
       name: "Audit public history"
       run: tools/check_public_release.sh --history

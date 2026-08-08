@@ -82,6 +82,55 @@ if (( check_tree )); then
         exit 11
     fi
 
+    # Scan the complete inherited tree for high-confidence additions while
+    # preserving the two known vendor workstation paths and one attribution
+    # address already present in the imported SDK. Any new identity fails.
+    if git -C "$tree_root" grep -I -n -E \
+        'gh[pousr]_[A-Za-z0-9_]{20,}|github_pat_[A-Za-z0-9_]{20,}|AKIA[0-9A-Z]{16}|-----BEGIN ([A-Z0-9 ]+ )?PRIVATE KEY-----' \
+        -- . ':!tools/check_public_release.sh' 2>/dev/null; then
+        echo "ERROR: possible credential or private key in complete publication tree" >&2
+        exit 12
+    fi
+
+    if git -C "$tree_root" grep -I -n -E \
+        '/(home|Users)/[^/[:space:]]+/|[A-Za-z]:\\Users\\[^\\[:space:]]+\\|\.codex/(attachments|visualizations)/' \
+        -- . ':!tools/check_public_release.sh' 2>/dev/null \
+        | grep -Ev '/home/(yaya|aiden)/'; then
+        echo "ERROR: unexpected workstation path in complete publication tree" >&2
+        exit 12
+    fi
+
+    if git -C "$tree_root" grep -I -n -E \
+        '[[:alnum:]._%+-]+@(gmail|outlook|hotmail|icloud|protonmail)[.]com' \
+        -- . ':!tools/check_public_release.sh' 2>/dev/null \
+        | grep -Fiv 'ek9852@gmail.com'; then
+        echo "ERROR: unexpected personal-mail address in complete publication tree" >&2
+        exit 12
+    fi
+
+    if git -C "$tree_root" grep -I -n -E \
+        'persist[.]service[.]bdroid[.]bdaddr[[:space:]]*=[[:space:]]*([[:xdigit:]]{2}:){5}[[:xdigit:]]{2}' \
+        -- . ':!tools/check_public_release.sh' 2>/dev/null; then
+        echo "ERROR: shared Android Bluetooth address in publication tree" >&2
+        exit 12
+    fi
+
+    if git -C "$tree_root" grep -I -n -E \
+        'AicBtsnoopNetDump[[:space:]]*=[[:space:]]*true' -- src 2>/dev/null; then
+        echo "ERROR: experimental Android network btsnoop is enabled by default" >&2
+        exit 12
+    fi
+
+    mapfile -t btsnoop_sources < <(
+        git -C "$tree_root" ls-files | grep '/aic_btsnoop_net[.]c$' || true
+    )
+    for source in "${btsnoop_sources[@]}"; do
+        if ! grep -Fq 'EXPERIMENTAL_DIAGNOSTIC_ONLY' "$tree_root/$source"; then
+            echo "ERROR: unmarked experimental network btsnoop source: $source" >&2
+            exit 12
+        fi
+    done
+
     audit_paths=(README.md SECURITY.md docs tools firmware packaging .github debian/control)
     if git -C "$tree_root" grep -I -n -E \
         '/(home|Users)/[^/[:space:]]+/|[A-Za-z]:\\Users\\[^\\[:space:]]+\\|\.codex/(attachments|visualizations)/' -- \

@@ -151,14 +151,15 @@ static int cmd_mgr_msgind(struct rwnx_cmd_mgr *cmd_mgr, struct rwnx_cmd_e2amsg *
                 found = true;
                 cmd->flags &= ~RWNX_CMD_FLAG_WAIT_CFM;
 
-                if (WARN((msg->param_len > RWNX_CMD_E2AMSG_LEN_MAX),
-                         "Unexpect E2A msg len %d > %d\n", msg->param_len,
-                         RWNX_CMD_E2AMSG_LEN_MAX)) {
-                    msg->param_len = RWNX_CMD_E2AMSG_LEN_MAX;
+                if (cmd->e2a_msg && msg->param_len) {
+                    if (WARN(msg->param_len > cmd->e2a_msg_len,
+                             "E2A msg len %u exceeds destination %u\n",
+                             msg->param_len, cmd->e2a_msg_len)) {
+                        cmd->result = -EMSGSIZE;
+                    } else {
+                        memcpy(cmd->e2a_msg, &msg->param, msg->param_len);
+                    }
                 }
-
-                if (cmd->e2a_msg && msg->param_len)
-                    memcpy(cmd->e2a_msg, &msg->param, msg->param_len);
 
                 if (RWNX_CMD_WAIT_COMPLETE(cmd->flags))
                     cmd_complete(cmd_mgr, cmd);
@@ -236,10 +237,21 @@ void rwnx_cmd_mgr_deinit(struct rwnx_cmd_mgr *cmd_mgr)
 
 void aicwf_set_cmd_tx(void *dev, struct lmac_msg *msg, uint len)
 {
-	struct aic_usb_dev *usbdev = (struct aic_usb_dev *)dev;
-    struct aicwf_bus *bus = usbdev->bus_if;
-    u8 *buffer = bus->cmd_buf;
+		struct aic_usb_dev *usbdev = (struct aic_usb_dev *)dev;
+    struct aicwf_bus *bus;
+    u8 *buffer;
     u16 index = 0;
+
+    if (!usbdev || !usbdev->bus_if || !msg)
+        return;
+    bus = usbdev->bus_if;
+    buffer = bus->cmd_buf;
+    if (!buffer || len < sizeof(*msg) || len > CMD_BUF_MAX - 8 ||
+            msg->param_len > len - sizeof(*msg)) {
+        printk(KERN_ERR "invalid command length: total=%u param=%u\n",
+               len, msg ? msg->param_len : 0);
+        return;
+    }
 
     memset(buffer, 0, CMD_BUF_MAX);
     buffer[0] = (len+4) & 0x00ff;
@@ -298,14 +310,21 @@ static void rwnx_msg_free(struct lmac_msg *msg, const void *msg_params)
 
 
 static int rwnx_send_msg(struct aic_usb_dev *usbdev, const void *msg_params,
-                         int reqcfm, lmac_msg_id_t reqid, void *cfm)
+                         int reqcfm, lmac_msg_id_t reqid, void *cfm,
+                         size_t cfm_len)
 {
     struct lmac_msg *msg;
     struct rwnx_cmd *cmd;
     bool nonblock;
     int ret = 0;
 
+    if (!msg_params)
+        return -EINVAL;
     msg = container_of((void *)msg_params, struct lmac_msg, param);
+    if (!usbdev || !usbdev->bus_if) {
+        rwnx_msg_free(msg, msg_params);
+        return -ENODEV;
+    }
     if(usbdev->bus_if->state == BUS_DOWN_ST) {
         rwnx_msg_free(msg, msg_params);
         printk("bus is down\n");
@@ -314,11 +333,16 @@ static int rwnx_send_msg(struct aic_usb_dev *usbdev, const void *msg_params,
 
     nonblock = 0;
     cmd = kzalloc(sizeof(struct rwnx_cmd), nonblock ? GFP_ATOMIC : GFP_KERNEL);
+    if (!cmd) {
+        rwnx_msg_free(msg, msg_params);
+        return -ENOMEM;
+    }
     cmd->result  = -EINTR;
     cmd->id      = msg->id;
     cmd->reqid   = reqid;
     cmd->a2e_msg = msg;
     cmd->e2a_msg = cfm;
+    cmd->e2a_msg_len = min_t(size_t, cfm_len, U16_MAX);
     if (nonblock)
         cmd->flags = RWNX_CMD_FLAG_NONBLOCK;
     if (reqcfm)
@@ -354,7 +378,8 @@ int rwnx_send_dbg_mem_mask_write_req(struct aic_usb_dev *usbdev, u32 mem_addr,
     mem_mask_write_req->memdata = mem_data;
 
     /* Send the DBG_MEM_MASK_WRITE_REQ message to LMAC FW */
-    return rwnx_send_msg(usbdev, mem_mask_write_req, 1, DBG_MEM_MASK_WRITE_CFM, NULL);
+    return rwnx_send_msg(usbdev, mem_mask_write_req, 1,
+                         DBG_MEM_MASK_WRITE_CFM, NULL, 0);
 }
 
 
@@ -365,6 +390,9 @@ int rwnx_send_dbg_mem_block_write_req(struct aic_usb_dev *usbdev, u32 mem_addr,
     struct dbg_mem_block_write_req *mem_blk_write_req;
 
     /* Build the DBG_MEM_BLOCK_WRITE_REQ message */
+    if (!mem_data || mem_size > sizeof(mem_blk_write_req->memdata))
+        return -EINVAL;
+
     mem_blk_write_req = rwnx_msg_zalloc(DBG_MEM_BLOCK_WRITE_REQ, TASK_DBG, DRV_TASK_ID,
                                         sizeof(struct dbg_mem_block_write_req));
     if (!mem_blk_write_req)
@@ -376,7 +404,8 @@ int rwnx_send_dbg_mem_block_write_req(struct aic_usb_dev *usbdev, u32 mem_addr,
     memcpy(mem_blk_write_req->memdata, mem_data, mem_size);
 
     /* Send the DBG_MEM_BLOCK_WRITE_REQ message to LMAC FW */
-    return rwnx_send_msg(usbdev, mem_blk_write_req, 1, DBG_MEM_BLOCK_WRITE_CFM, NULL);
+    return rwnx_send_msg(usbdev, mem_blk_write_req, 1,
+                         DBG_MEM_BLOCK_WRITE_CFM, NULL, 0);
 }
 
 
@@ -396,7 +425,8 @@ int rwnx_send_dbg_mem_read_req(struct aic_usb_dev *usbdev, u32 mem_addr,
     mem_read_req->memaddr = mem_addr;
 
     /* Send the DBG_MEM_READ_REQ message to LMAC FW */
-    return rwnx_send_msg(usbdev, mem_read_req, 1, DBG_MEM_READ_CFM, cfm);
+    return rwnx_send_msg(usbdev, mem_read_req, 1, DBG_MEM_READ_CFM,
+                         cfm, cfm ? sizeof(*cfm) : 0);
 }
 
 
@@ -417,7 +447,8 @@ int rwnx_send_dbg_mem_write_req(struct aic_usb_dev *usbdev, u32 mem_addr, u32 me
     mem_write_req->memdata = mem_data;
 
     /* Send the DBG_MEM_WRITE_REQ message to LMAC FW */
-    return rwnx_send_msg(usbdev, mem_write_req, 1, DBG_MEM_WRITE_CFM, NULL);
+    return rwnx_send_msg(usbdev, mem_write_req, 1,
+                         DBG_MEM_WRITE_CFM, NULL, 0);
 }
 
 int rwnx_send_dbg_start_app_req(struct aic_usb_dev *usbdev, u32 boot_addr,
@@ -450,7 +481,7 @@ int rwnx_send_dbg_start_app_req(struct aic_usb_dev *usbdev, u32 boot_addr,
     start_app_req->boottype = boot_type;
 
     /* Send the DBG_START_APP_REQ message to LMAC FW */
-    ret = rwnx_send_msg(usbdev, start_app_req, 0, 0, NULL);
+    ret = rwnx_send_msg(usbdev, start_app_req, 0, 0, NULL, 0);
     if (diag_d80_handoff && usbdev &&
         (usbdev->chipid == PRODUCT_ID_AIC8800D80 ||
          usbdev->chipid == PRODUCT_ID_AIC8800D80X2))
@@ -467,10 +498,37 @@ static msg_cb_fct *msg_hdlrs[] = {
     [TASK_DBG]   = dbg_hdlrs,
 };
 
-void rwnx_rx_handle_msg(struct aic_usb_dev *usbdev, struct ipc_e2a_msg *msg)
+void rwnx_rx_handle_msg(struct aic_usb_dev *usbdev, struct ipc_e2a_msg *msg,
+                        size_t msg_len)
 {
-    usbdev->cmd_mgr.msgind(&usbdev->cmd_mgr, msg,
-                            msg_hdlrs[MSG_T(msg->id)][MSG_I(msg->id)]);
+    lmac_task_id_t task;
+    unsigned int index;
+    msg_cb_fct cb = NULL;
+
+    if (!usbdev || !msg || msg_len < offsetof(struct ipc_e2a_msg, param))
+        return;
+    if (msg->param_len > RWNX_CMD_E2AMSG_LEN_MAX ||
+            msg->param_len > msg_len - offsetof(struct ipc_e2a_msg, param)) {
+        printk(KERN_ERR "invalid E2A parameter length %u (frame %zu)\n",
+               msg->param_len, msg_len);
+        return;
+    }
+
+    task = MSG_T(msg->id);
+    index = MSG_I(msg->id);
+    if (task >= ARRAY_SIZE(msg_hdlrs) || !msg_hdlrs[task]) {
+        printk(KERN_ERR "invalid E2A task %u\n", task);
+        return;
+    }
+    if (task == TASK_DBG) {
+        if (index >= ARRAY_SIZE(dbg_hdlrs)) {
+            printk(KERN_ERR "invalid E2A DBG index %u\n", index);
+            return;
+        }
+        cb = dbg_hdlrs[index];
+    }
+
+    usbdev->cmd_mgr.msgind(&usbdev->cmd_mgr, msg, cb);
 }
 
 
@@ -484,6 +542,4 @@ int rwnx_send_reboot(struct aic_usb_dev *usbdev)
     ret = rwnx_send_dbg_start_app_req(usbdev, delay, HOST_START_APP_REBOOT);
     return ret;
 }
-
-
 
